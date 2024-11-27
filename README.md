@@ -1,4 +1,4 @@
-Fish Bubble Shooter Game
+**Fish Bubble Shooter Game**
 
 Fish Game is an engaging underwater adventure 2D game where players control a fish to shoot bubbles and avoid non-bouncing bubbles, navigating through obstacles and collecting points to survive and thrive while advancing through the levels.
 
