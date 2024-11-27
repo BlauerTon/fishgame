@@ -1,202 +1,231 @@
 import pygame
 import random
 import sys
+import json
 
-# Initialize pygame and constants
+# Initialize pygame
 pygame.init()
+pygame.mixer.init()
+
+# Screen dimensions
 WIDTH, HEIGHT = 800, 600
 WHITE = (255, 255, 255)
 BLUE = (0, 100, 255)
 RED = (255, 0, 0)
+GREEN = (0, 255, 0)
+YELLOW = (255, 255, 0)
+ORANGE = (255, 165, 0)
+PURPLE = (128, 0, 128)
 
-# Game settings
-fish_speed = 7
-bubble_speed = 3
-bubble_spawn_rate = 30  # Frames between new bubbles
+# Sound setup
+try:
+    pop_sound = pygame.mixer.Sound('pop.wav')
+    shoot_sound = pygame.mixer.Sound('shoot.wav')
+except:
+    pop_sound = None
+    shoot_sound = None
+    print("Warning: Could not load sound file")
 
-# Initialize screen and font
-screen = pygame.display.set_mode((WIDTH, HEIGHT))
-pygame.display.set_caption("Fish Bubble Shooter")
-font = pygame.font.SysFont(None, 36)
+# High Score file
+HIGH_SCORE_FILE = 'high_scores.json'
 
-# Game variables
-score = 0
-game_over = False
 
-# Fish setup
-fish_color = (0, 100, 255)
-fish_width, fish_height = 60, 30
-fish_rect = pygame.Rect(WIDTH // 10, HEIGHT // 2 - fish_height // 2, fish_width, fish_height)
+class HighScoreManager:
+    @staticmethod
+    def load_high_scores():
+        try:
+            with open(HIGH_SCORE_FILE, 'r') as f:
+                return json.load(f)
+        except FileNotFoundError:
+            return []
 
-# Bubble and particle lists
-bubbles = []
-particles = []  # For ocean effect particles
+    @staticmethod
+    def save_high_score(score, level):
+        scores = HighScoreManager.load_high_scores()
+        scores.append({'score': score, 'level': level})
+        scores = sorted(scores, key=lambda x: x['score'], reverse=True)[:10]
+        with open(HIGH_SCORE_FILE, 'w') as f:
+            json.dump(scores, f)
 
-# Bullet setup
-bullet_image = pygame.Surface((10, 5))
-bullet_image.fill(RED)
-bullets = []
 
-# Classes
+class GameSettings:
+    def __init__(self):
+        self.fish_speed = 7
+        self.level = 1
+        self.score = 0
+        self.lives = 3
+        self.bubbles_popped = 0
+        self.level_up_alert_timer = 0
+
+
 class Bubble:
-    def _init_(self, bouncing=True):  # Corrected constructor method
-        self.image = pygame.Surface((30, 30), pygame.SRCALPHA)
-        pygame.draw.circle(self.image, WHITE, (15, 15), 15)
-        self.rect = self.image.get_rect(center=(WIDTH, random.randint(0, HEIGHT)))
-        self.bouncing = bouncing
-        if self.bouncing:
-            # Bouncing bubbles move diagonally leftward
-            self.speed_x = -bubble_speed
-            self.speed_y = random.choice([-bubble_speed, bubble_speed])
+    def __init__(self, level, special=False):
+        self.special = special
+        if self.special:
+            self.image = pygame.Surface((30, 30), pygame.SRCALPHA)
+            pygame.draw.circle(self.image, YELLOW, (15, 15), 15)
         else:
-            self.speed_x = -bubble_speed
-            self.speed_y = 0
+            self.image = pygame.Surface((30, 30), pygame.SRCALPHA)
+            pygame.draw.circle(self.image, WHITE, (15, 15), 15)
+        self.rect = self.image.get_rect(center=(WIDTH, random.randint(0, HEIGHT)))
+        self.speed = -(1.5 + (level - 1) * 0.5)
 
-    def move(self):  # Bubble movement method
-        self.rect.x += self.speed_x
-        self.rect.y += self.speed_y if self.bouncing else 0
-        # Bounce off top and bottom edges
-        if self.bouncing:
-            if self.rect.top <= 0 or self.rect.bottom >= HEIGHT:
-                self.speed_y *= -1
+    def move(self):
+        self.rect.x += self.speed
 
-    def draw(self):  # New draw method to render the bubble on the screen
+    def draw(self, screen):
         screen.blit(self.image, self.rect)
 
 
 class Bullet:
-    def _init_(self, x, y):
-        self.rect = bullet_image.get_rect(center=(x, y))
+    def __init__(self, x, y):
+        self.rect = pygame.Rect(x, y, 10, 5)
+        self.speed = 10
 
     def move(self):
-        self.rect.x += 10  # Bullet speed
+        self.rect.x += self.speed
 
-    def draw(self):
-        screen.blit(bullet_image, self.rect)
-
-
-class Particle:
-    """Small particles moving to simulate an ocean effect."""
-    def _init_(self):
-        self.x = random.randint(0, WIDTH)
-        self.y = random.randint(0, HEIGHT)
-        self.speed_y = random.choice([-1, 1]) * random.uniform(0.5, 1.5)
-        self.size = random.randint(1, 3)
-
-    def move(self):
-        self.y += self.speed_y
-        if self.y < 0 or self.y > HEIGHT:
-            self.y = random.randint(0, HEIGHT)  # Reset position
-
-    def draw(self):
-        pygame.draw.circle(screen, WHITE, (int(self.x), int(self.y)), self.size)
+    def draw(self, screen):
+        pygame.draw.rect(screen, RED, self.rect)
 
 
-# Functions
-def move_fish(keys):
-    if keys[pygame.K_UP] and fish_rect.top > 0:
-        fish_rect.y -= fish_speed
-    if keys[pygame.K_DOWN] and fish_rect.bottom < HEIGHT:
-        fish_rect.y += fish_speed
-
-
-def draw_fish():
-    pygame.draw.ellipse(screen, fish_color, fish_rect)  # Fish body
-    pygame.draw.polygon(screen, WHITE, [
+def draw_fish(screen, fish_rect):
+    pygame.draw.ellipse(screen, ORANGE, fish_rect)  # Body
+    tail_points = [
         (fish_rect.left, fish_rect.centery),
-        (fish_rect.left - 15, fish_rect.centery - 10),
-        (fish_rect.left - 15, fish_rect.centery + 10)
-    ])  # Fish tail
-    pygame.draw.circle(screen, WHITE, (fish_rect.right - 10, fish_rect.centery - 5), 3)  # Fish eye
+        (fish_rect.left - 20, fish_rect.centery - 15),
+        (fish_rect.left - 20, fish_rect.centery + 15)
+    ]
+    pygame.draw.polygon(screen, ORANGE, tail_points)  # Tail
+    eye_pos = (fish_rect.right - 15, fish_rect.centery - 5)
+    pygame.draw.circle(screen, WHITE, eye_pos, 5)  # Eye
+    pygame.draw.circle(screen, (0, 0, 0), eye_pos, 2)  # Pupil
 
 
-def draw_ocean_background():
-    """Draws a gradient background and moving particles for an ocean effect."""
-    for i in range(HEIGHT):
-        color = (0, 0, int(50 + (i / HEIGHT) * 100))  # Gradient blue
-        pygame.draw.line(screen, color, (0, i), (WIDTH, i))
-    # Draw particles
-    for particle in particles:
-        particle.move()
-        particle.draw()
+def draw_game_over_screen(screen, score, level):
+    overlay = pygame.Surface((WIDTH, HEIGHT))
+    overlay.fill((0, 0, 0))
+    overlay.set_alpha(128)
+    screen.blit(overlay, (0, 0))
+
+    font = pygame.font.SysFont(None, 64)
+    small_font = pygame.font.SysFont(None, 36)
+
+    game_over_text = font.render("GAME OVER", True, WHITE)
+    game_over_rect = game_over_text.get_rect(center=(WIDTH // 2, HEIGHT // 2 - 60))
+
+    score_text = small_font.render(f"Total Score: {score}", True, WHITE)
+    score_rect = score_text.get_rect(center=(WIDTH // 2, HEIGHT // 2))
+
+    level_text = small_font.render(f"Level Reached: {level}", True, WHITE)
+    level_rect = level_text.get_rect(center=(WIDTH // 2, HEIGHT // 2 + 40))
+
+    restart_text = small_font.render("Press R to Restart", True, WHITE)
+    restart_rect = restart_text.get_rect(center=(WIDTH // 2, HEIGHT // 2 + 100))
+
+    screen.blit(game_over_text, game_over_rect)
+    screen.blit(score_text, score_rect)
+    screen.blit(level_text, level_rect)
+    screen.blit(restart_text, restart_rect)
 
 
-def spawn_bubble():
-    # Randomly decide if a bubble is bouncing or moving straight left
-    bouncing = random.choice([True, False])
-    if random.randint(0, bubble_spawn_rate) == 0:
-        bubbles.append(Bubble(bouncing))
-
-
-def move_bubbles():
-    global bubbles, game_over
-    for bubble in bubbles:
-        bubble.move()
-        if bubble.rect.left <= 0 and not bubble.bouncing:
-            game_over = True  # End game if a non-bouncing bubble reaches the left side
-    bubbles = [bubble for bubble in bubbles if bubble.rect.x > 0]  # Remove bubbles out of screen
-
-
-def move_bullets():
-    global bullets, score
-    for bullet in bullets:
-        bullet.move()
-        for bubble in bubbles[:]:
-            if bullet.rect.colliderect(bubble.rect):
-                bubbles.remove(bubble)
-                bullets.remove(bullet)
-                score += 1
-                break
-    bullets = [bullet for bullet in bullets if bullet.rect.x < WIDTH]
-
-
-def draw_elements():
-    draw_ocean_background()
-    draw_fish()
-    for bubble in bubbles:
-        bubble.draw()
-    for bullet in bullets:
-        bullet.draw()
-    score_text = font.render(f"Score: {score}", True, WHITE)
-    screen.blit(score_text, (10, 10))
-
-
-def display_game_over():
-    game_over_text = font.render(f"Game Over! Score: {score}", True, WHITE)
-    screen.blit(game_over_text, (WIDTH // 2 - 100, HEIGHT // 2))
-
-
-# Main game loop
 def main():
-    global game_over
+    screen = pygame.display.set_mode((WIDTH, HEIGHT))
+    pygame.display.set_caption("Fish Bubble Shooter")
+    font = pygame.font.SysFont(None, 36)
     clock = pygame.time.Clock()
 
-    # Initialize particles for the ocean background
-    for _ in range(50):
-        particles.append(Particle())
+    game_settings = GameSettings()
+    game_over = False
+
+    fish_rect = pygame.Rect(WIDTH // 10, HEIGHT // 2 - 15, 60, 30)
+    bubbles = []
+    bullets = []
 
     while True:
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 pygame.quit()
                 sys.exit()
-            elif event.type == pygame.KEYDOWN and not game_over:
-                if event.key == pygame.K_SPACE:
-                    # Shoot a bullet from the fish's position
-                    bullets.append(Bullet(fish_rect.right, fish_rect.centery))
+
+            if game_over:
+                if event.type == pygame.KEYDOWN and event.key == pygame.K_r:
+                    game_settings = GameSettings()
+                    fish_rect = pygame.Rect(WIDTH // 10, HEIGHT // 2 - 15, 60, 30)
+                    bubbles.clear()
+                    bullets.clear()
+                    game_over = False
+
+            if not game_over and event.type == pygame.KEYDOWN and event.key == pygame.K_SPACE:
+                bullets.append(Bullet(fish_rect.right, fish_rect.centery))
+                if shoot_sound:
+                    shoot_sound.play()
 
         if not game_over:
             keys = pygame.key.get_pressed()
-            move_fish(keys)
-            spawn_bubble()
-            move_bubbles()
-            move_bullets()
-            draw_elements()
+            if keys[pygame.K_UP] and fish_rect.top > 0:
+                fish_rect.y -= game_settings.fish_speed
+            if keys[pygame.K_DOWN] and fish_rect.bottom < HEIGHT:
+                fish_rect.y += game_settings.fish_speed
+
+            if random.randint(0, 25) == 0:
+                bubbles.append(Bubble(game_settings.level))
+            if random.randint(0, 200) == 0:  # Special bubble appears very rarely
+                bubbles.append(Bubble(game_settings.level, special=True))
+
+            for bubble in bubbles[:]:
+                bubble.move()
+                if bubble.rect.right < 0:  # Bubble crosses the screen
+                    game_settings.lives -= 1
+                    bubbles.remove(bubble)
+                    if game_settings.lives <= 0:
+                        game_over = True
+                        HighScoreManager.save_high_score(game_settings.score, game_settings.level)
+
+            for bullet in bullets[:]:
+                bullet.move()
+                for bubble in bubbles[:]:
+                    if bullet.rect.colliderect(bubble.rect):
+                        bubbles.remove(bubble)
+                        bullets.remove(bullet)
+                        game_settings.score += 10  # Standard scoring for all bubbles
+                        game_settings.bubbles_popped += 1
+                        if game_settings.bubbles_popped >= game_settings.level * 10:
+                            game_settings.level += 1
+                            game_settings.level_up_alert_timer = 90
+                        break
+
+            if game_settings.level_up_alert_timer > 0:
+                game_settings.level_up_alert_timer -= 1
+
+        screen.fill((0, 0, 150))
+
+        draw_fish(screen, fish_rect)
+
+        for bubble in bubbles:
+            bubble.draw(screen)
+
+        for bullet in bullets:
+            bullet.draw(screen)
+
+        if not game_over:
+            score_text = font.render(f"Score: {game_settings.score}", True, WHITE)
+            level_text = font.render(f"Level: {game_settings.level}", True, WHITE)
+            lives_text = font.render(f"Lives: {game_settings.lives}", True, WHITE)
+
+            screen.blit(score_text, (10, 10))
+            screen.blit(level_text, (10, 50))
+            screen.blit(lives_text, (10, 90))
+
+            if game_settings.level_up_alert_timer > 0:
+                alert_text = font.render(f"Level {game_settings.level}!", True, YELLOW)
+                screen.blit(alert_text, (WIDTH // 2 - alert_text.get_width() // 2, HEIGHT // 2))
         else:
-            display_game_over()
+            draw_game_over_screen(screen, game_settings.score, game_settings.level)
 
         pygame.display.flip()
         clock.tick(30)
 
-if _name_ == "_main_":
+
+if __name__ == "__main__":
     main()
