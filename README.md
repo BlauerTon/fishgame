@@ -13,9 +13,10 @@ Fish Game is an engaging underwater adventure 2D game where players control a fi
    
    cd fish-bubble-shooter
 3. Install dependencies outlined in requirements.txt
+   
    pip install -r requirements.txt
    
-4. Run the Fish_game.py file from Pycharm IDE to play.
+5. Run the Fish_game.py file from Pycharm IDE to play.
 
 
  Game Controls
